@@ -2,4 +2,4 @@ theme: jekyll-theme-slate
 title: BigFix Performance & Capacity Planning Resources
 description: "BigFix: Find and fix all endpoints... fast!"
 show_downloads: true
-google_analytics:
+google_analytics: UA-156006114-1
