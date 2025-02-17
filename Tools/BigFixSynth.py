@@ -21,6 +21,18 @@ labelIOQ     = 'IO Queue'
 labelMemory  = 'Memory %'
 labelPaging  = 'Paging %'
 
+# Constants for various programmatic choices.
+class choices:
+   # The distributions to support.
+   distributionBinomial   = 'binomial'
+   distributionChiSquared = 'chisquared'
+   distributionRandom     = 'random'
+   # Output formats for the result. 
+   outputCSV   = 'csv'
+   outputGraph = 'graph'
+   outputJSON  = 'json'
+   outputTable = 'table'
+
 # Min/max values for counters.
 monitorMinMax = {labelCPU:     ( 2,    100),
                  labelCrashes: ( 0,      2),
@@ -65,33 +77,45 @@ def introduceChaos(chaosClass, monitorFrame, chaosFrame):
          monitorFrame.loc[monitorIndex.index.tolist(), k] = max
    return(monitorFrame)
 
-def generateMonitorDetail(label, low, high, samples):
-   monitorDetail = np.random.randint(low, high, size=samples)
-   monitorFrame = {label: monitorDetail}
+def generateMonitorDetail(label, rangeLow, rangeHigh, rangeMax, probability, samples, distribution):
+   # Set up the random number generator.
+   rng = np.random.default_rng()
+   match distribution:
+      case choices.distributionBinomial:
+         monitorDetail = rng.binomial(n=rangeMax, p=probability,size=samples)
+         monitorFrame = {label: monitorDetail}
+      case choices.distributionRandom:
+         monitorDetail = np.random.randint(rangeLow, rangeHigh + 1, size=samples)
+         monitorFrame = {label: monitorDetail}
+      case _:
+         print("Unknown distribution.")
    return(monitorFrame)
 
-def generateMonitor(interval, samples, chaosFrame):
+def generateMonitor(interval, samples, distribution, chaosFrame):
    timeSeries = generateTimeSeries(interval, samples)
    dataMonitor = chaosFrame
-   dataMonitor.update(generateMonitorDetail(labelCrashes, 0,   2, samples))
-   dataMonitor.update(generateMonitorDetail(labelCPU,     5,  30, samples))
-   dataMonitor.update(generateMonitorDetail(labelMemory, 30,  70, samples))
-   dataMonitor.update(generateMonitorDetail(labelPaging,  0,  10, samples))
-   dataMonitor.update(generateMonitorDetail(labelIOPS,  100,1000, samples))
-   dataMonitor.update(generateMonitorDetail(labelIOQ,     0,   3, samples))
+   dataMonitor.update(generateMonitorDetail(labelCrashes,  0,   1,    1,  0.1, samples, distribution))
+   dataMonitor.update(generateMonitorDetail(labelCPU,     10,  30,  100, 0.15, samples, distribution))
+   dataMonitor.update(generateMonitorDetail(labelMemory,  60,  70,  100, 0.65, samples, distribution))
+   dataMonitor.update(generateMonitorDetail(labelPaging,   3,   5,  100, 0.03, samples, distribution))
+   dataMonitor.update(generateMonitorDetail(labelIOPS,   100, 900, 5000, 0.20, samples, distribution))
+   dataMonitor.update(generateMonitorDetail(labelIOQ,      0,   3,   10, 0.05, samples, distribution))
    monitorFrame = pd.DataFrame(dataMonitor, index=timeSeries)
    return(monitorFrame)
 
 def plotMonitor(outputFormat, monitorFrame):
-   if (outputFormat == 'graph'):
-      plot = monitorFrame.plot(title="BigFix Synthetic Data")
-      mp.show() 
-   elif outputFormat == 'csv':
-      monitorFrame.to_csv(sys.stdout)
-   elif outputFormat == 'json':
-      monitorFrame.to_json(sys.stdout, date_format='iso', orient='index')
-   else:
-      print(monitorFrame)
+   match outputFormat:
+      case choices.outputCSV:
+         monitorFrame.to_csv(sys.stdout)
+      case choices.outputGraph:
+         plot = monitorFrame.plot(title="BigFix Synthetic Data")
+         mp.show() 
+      case choices.outputJSON:
+         monitorFrame.to_json(sys.stdout, date_format='iso', orient='index')
+      case choices.outputTable:
+         print(monitorFrame)
+      case _:
+         print("Unknown output format.")
    return()
 
 def main(argv):
@@ -99,23 +123,31 @@ def main(argv):
    parser = argparse.ArgumentParser(description="BigFix Synthetic Data Generator")
    parser.add_argument("--chaosFactor", "-f", required=False, dest="chaosFactor", type=float, default=1.0,
                                               help="The chaos factor aka monitor range multiplier.")
-   parser.add_argument("--chaosClass",  "-c", required=False, dest="chaosClass", choices=[labelCrashes, labelCPU, labelMemory, labelPaging, labelIOPS, labelIOQ], type=str, default='CPU %',
-                                              nargs="+",
+   parser.add_argument("--chaosClass",  "-c", required=False, dest="chaosClass",
+                                              choices=[labelCrashes, labelCPU, labelMemory, labelPaging, labelIOPS, labelIOQ],
+                                              type=str, default='CPU %', nargs="+",
                                               help="The monitor set to be affected by the chaos factor.")
-   parser.add_argument("--chaosProfile","-p", required=False, dest="chaosProfile", choices=['All', 'Monday9to10'], type=str, default='Monday9to10',
+   parser.add_argument("--chaosProfile","-p", required=False, dest="chaosProfile",
+                                              choices=['All', 'Monday9to10'], type=str, default='Monday9to10',
                                               help="The time based profile for the chaos factor.")
+   parser.add_argument("--distribution","-d", required=False, dest="distribution",
+                                              choices=[choices.distributionRandom, choices.distributionBinomial], type=str,
+                                              default=choices.distributionBinomial,
+                                              help="The distribution to use for the generated data (default=" + choices.distributionBinomial + ").")
    parser.add_argument("--interval",    "-i", required=False, dest="interval", type=int, default=5,
                                               help="The sample time interval in seconds.")
    parser.add_argument("--samples",     "-s", required=False, dest="samples", type=int, default=12,
                                               help="The number of samples to generate.")
-   parser.add_argument("--output",      "-o", required=False, dest="output", choices=['graph', 'csv', 'json', 'table'], type=str, default='table',
-                                              help="The output format to display (default=table).")
+   parser.add_argument("--output",      "-o", required=False, dest="output",
+                                              choices=[choices.outputGraph, choices.outputCSV, choices.outputJSON, choices.outputTable],
+                                              type=str, default=choices.outputTable,
+                                              help="The output format to display (default=" + choices.outputTable + ").")
    args = parser.parse_args()
 
    # Generate the dataframe and plot it.
    timeSeries   = generateTimeSeries(args.interval, args.samples)
    chaosFrame   = generateChaos(timeSeries, args.chaosFactor, args.chaosProfile)
-   monitorFrame = generateMonitor(args.interval, args.samples, chaosFrame)
+   monitorFrame = generateMonitor(args.interval, args.samples, args.distribution, chaosFrame)
    monitorFrame = introduceChaos(args.chaosClass, monitorFrame, chaosFrame)
    plotMonitor(args.output, monitorFrame)
 
